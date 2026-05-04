@@ -44,7 +44,14 @@
       "windows": {
         "certificateThumbprint": null,
         "digestAlgorithm": "sha256",
-        "timestampUrl": ""
+        "timestampUrl": "",
+        "fileAssociations": [
+          {
+            "ext": ["docx"],
+            "name": "Docx Reader",
+            "description": "Word Document"
+          }
+        ]
       }
     },
     "security": {
