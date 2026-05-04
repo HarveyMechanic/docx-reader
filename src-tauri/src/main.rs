@@ -65,8 +65,6 @@ fn new_window(
     let mut outline_paras_dict = outline_paras.0.lock().unwrap();
     let mut search_results_dict = search_results.0.lock().unwrap();
 
-    // get window from last focus, to allow for recently created windows
-    // default to window that emitted command
     let window = app.get_window(&windows_create.last_focus).unwrap_or(window);
 
     let mut pos = window.inner_position().unwrap();
@@ -88,8 +86,6 @@ fn new_window(
 
         pos.x += 80;
         pos.y += 80;
-        // using as will break if width/height > 2147483647
-        // ... it won't
         if (pos.x + size.width as i32)
             > window.current_monitor().unwrap().unwrap().size().width as i32
         {
@@ -108,17 +104,14 @@ fn new_window(
             .inner_size((size.width / 2).into(), (size.height / 2).into())
             .min_inner_size(300.0, 200.0);
 
-        // TODO: only focus last window
         let win = new_window.build().unwrap();
         #[cfg(target_os = "macos")]
         {
             win.set_transparent_titlebar(true);
         }
         if create.is_some() {
-            // set creation info
             windows_create.ready.insert(label.clone(), create.unwrap());
         }
-        // set last focus for quickly created windows
         windows_create.last_focus = label;
     }
     Ok(())
@@ -133,6 +126,18 @@ fn main() {
             {
                 win.set_transparent_titlebar(true);
             }
+
+            // Handle file opened via "Open With" on Windows
+            let args: Vec<String> = std::env::args().collect();
+            if args.len() > 1 {
+                let path = args[1].clone();
+                let win2 = win.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                    win2.emit("load_files", vec![path]).unwrap();
+                });
+            }
+
             app.listen_global("tauri://focus", |event| {
                 println!("{:?}", event.payload());
             });
