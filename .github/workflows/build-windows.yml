@@ -49,10 +49,11 @@ jobs:
       - name: Install frontend dependencies
         run: npm install
 
-      - name: Build Tauri app
+- name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUSTFLAGS: "--cfg windows_skip_core_foundation_file_descriptor"
 
       - name: Upload EXE artifact
         uses: actions/upload-artifact@v4
