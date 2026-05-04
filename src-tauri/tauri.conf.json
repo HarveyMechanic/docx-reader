@@ -22,6 +22,13 @@
         "depends": []
       },
       "externalBin": [],
+      "fileAssociations": [
+        {
+          "ext": ["docx"],
+          "name": "Docx Reader",
+          "description": "Word Document"
+        }
+      ],
       "icon": [
         "icons/32x32.png",
         "icons/128x128.png",
@@ -44,14 +51,7 @@
       "windows": {
         "certificateThumbprint": null,
         "digestAlgorithm": "sha256",
-        "timestampUrl": "",
-        "fileAssociations": [
-          {
-            "ext": ["docx"],
-            "name": "Docx Reader",
-            "description": "Word Document"
-          }
-        ]
+        "timestampUrl": ""
       }
     },
     "security": {
