@@ -3,7 +3,10 @@ name: Build Windows EXE
 on:
   push:
     branches: [main, master]
-  workflow_dispatch:  # allows you to trigger it manually from GitHub website
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   build-windows:
@@ -26,6 +29,22 @@ jobs:
         uses: swatinem/rust-cache@v2
         with:
           workspaces: './src-tauri -> target'
+
+      - name: Remove bad patch from Cargo.toml
+        shell: pwsh
+        run: |
+          $content = Get-Content "src-tauri/Cargo.toml" -Raw
+          # Strip any [patch.crates-io] section we added previously
+          $content = [regex]::Replace($content, '\r?\n\[patch\.crates-io\][\s\S]*$', '')
+          Set-Content "src-tauri/Cargo.toml" $content -NoNewline
+
+      - name: Update core-foundation to fixed version
+        shell: pwsh
+        run: |
+          cd src-tauri
+          # Force cargo to use core-foundation 0.9.4 which has the Windows fix
+          cargo update -p core-foundation --precise 0.9.4
+          cargo update -p core-foundation-sys --precise 0.9.4
 
       - name: Install frontend dependencies
         run: npm install
