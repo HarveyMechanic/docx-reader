@@ -34,26 +34,39 @@ jobs:
         shell: pwsh
         run: |
           $content = Get-Content "src-tauri/Cargo.toml" -Raw
-          # Strip any [patch.crates-io] section we added previously
           $content = [regex]::Replace($content, '\r?\n\[patch\.crates-io\][\s\S]*$', '')
           Set-Content "src-tauri/Cargo.toml" $content -NoNewline
 
-     - name: Update core-foundation to fixed version
+      - name: Patch filedescriptor.rs to skip Unix code on Windows
         shell: pwsh
         run: |
+          $cargoHome = $env:USERPROFILE + "\.cargo"
+          # First run cargo fetch so the crate source is downloaded
           cd src-tauri
-          cargo update -p core-foundation --precise 0.9.4
-          cargo update -p cocoa --precise 0.24.1
-       
+          cargo fetch
+          cd ..
+          # Find the filedescriptor.rs file in the cargo registry
+          $file = Get-ChildItem -Path "$cargoHome\registry\src" -Recurse -Filter "filedescriptor.rs" |
+            Where-Object { $_.FullName -like "*core-foundation*" } |
+            Select-Object -First 1
+          if ($file) {
+            Write-Host "Patching: $($file.FullName)"
+            $src = Get-Content $file.FullName -Raw
+            # Wrap the entire file content in a cfg(unix) gate
+            $patched = "#[cfg(unix)]`nmod inner {`n" + $src + "`n}`n"
+            Set-Content $file.FullName $patched
+            Write-Host "Patched successfully"
+          } else {
+            Write-Host "filedescriptor.rs not found - may already be clean"
+          }
 
       - name: Install frontend dependencies
         run: npm install
 
-- name: Build Tauri app
+      - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RUSTFLAGS: "--cfg windows_skip_core_foundation_file_descriptor"
 
       - name: Upload EXE artifact
         uses: actions/upload-artifact@v4
