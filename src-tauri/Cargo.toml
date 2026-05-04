@@ -31,5 +31,3 @@ default = [ "custom-protocol" ]
 # DO NOT remove this
 custom-protocol = [ "tauri/custom-protocol" ]
 
-[patch.crates-io]
-core-foundation = { git = "https://github.com/servo/core-foundation-rs", rev = "80578a85ce2ba6358e16e8bc5ca89dde7c7af46c" }
