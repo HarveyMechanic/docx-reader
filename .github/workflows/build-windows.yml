@@ -39,58 +39,63 @@ jobs:
 
       - name: Fetch cargo dependencies
         shell: pwsh
-        run: |
-          cd src-tauri
-          cargo fetch
+        run: cd src-tauri && cargo fetch
 
       - name: Patch core-foundation for Windows
         shell: pwsh
         run: |
-          $cargoHome = $env:USERPROFILE + "\.cargo"
-          $registryBase = "$cargoHome\registry\src"
+          $registryBase = "$env:USERPROFILE\.cargo\registry\src"
 
-          # Find the core-foundation source directory (any version)
+          # Find the core-foundation source directory (not core-foundation-sys)
           $cfDir = Get-ChildItem -Path $registryBase -Recurse -Directory |
-            Where-Object { $_.Name -like "core-foundation-*" -and $_.Name -notlike "core-foundation-sys*" } |
+            Where-Object { $_.Name -match '^core-foundation-\d' } |
             Select-Object -First 1
 
           if (-not $cfDir) {
-            Write-Error "Could not find core-foundation source directory"
+            Write-Error "Could not find core-foundation source directory under $registryBase"
             exit 1
           }
+          Write-Host "Patching: $($cfDir.FullName)"
 
-          Write-Host "Found core-foundation at: $($cfDir.FullName)"
-
-          # --- Patch filedescriptor.rs: wrap entire content in #[cfg(unix)] ---
-          $fdFile = Join-Path $cfDir.FullName "src\filedescriptor.rs"
-          if (Test-Path $fdFile) {
-            Write-Host "Patching filedescriptor.rs"
-            $src = Get-Content $fdFile -Raw
-            if ($src -notmatch '#\[cfg\(unix\)\]') {
-              $patched = "#![cfg(unix)]`n`n" + $src
-              Set-Content $fdFile $patched -NoNewline
-            }
+          # ---- 1. filedescriptor.rs: gate entire file for unix only ----
+          $f = Join-Path $cfDir.FullName "src\filedescriptor.rs"
+          if (Test-Path $f) {
+            $src = Get-Content $f -Raw
+            if ($src -notmatch '#!\[cfg\(unix\)\]') {
+              Set-Content $f ("#![cfg(unix)]`n" + $src) -NoNewline
+              Write-Host "  Patched filedescriptor.rs"
+            } else { Write-Host "  filedescriptor.rs already patched" }
           }
 
-          # --- Patch url.rs: remove PATH_MAX from the libc import ---
-          $urlFile = Join-Path $cfDir.FullName "src\url.rs"
-          if (Test-Path $urlFile) {
-            Write-Host "Patching url.rs"
-            $src = Get-Content $urlFile -Raw
-            $src = $src -replace 'use libc::\{c_char, strlen, PATH_MAX\};', '#[cfg(unix)] use libc::{c_char, strlen, PATH_MAX};'
-            Set-Content $urlFile $src -NoNewline
+          # ---- 2. url.rs: remove PATH_MAX (not available on Windows libc) ----
+          $f = Join-Path $cfDir.FullName "src\url.rs"
+          if (Test-Path $f) {
+            $src = Get-Content $f -Raw
+            $new = $src -replace 'use libc::\{c_char, strlen, PATH_MAX\};', 'use libc::{c_char, strlen};'
+            if ($new -ne $src) {
+              Set-Content $f $new -NoNewline
+              Write-Host "  Patched url.rs (PATH_MAX removed)"
+            } else { Write-Host "  url.rs: pattern not found, skipping" }
           }
 
-          # --- Patch runloop.rs: gate the CFFileDescriptor import and usage ---
-          $rlFile = Join-Path $cfDir.FullName "src\runloop.rs"
-          if (Test-Path $rlFile) {
-            Write-Host "Patching runloop.rs"
-            $src = Get-Content $rlFile -Raw
-            $src = $src -replace 'use filedescriptor::CFFileDescriptor;', '#[cfg(unix)] use filedescriptor::CFFileDescriptor;'
-            Set-Content $rlFile $src -NoNewline
+          # ---- 3. runloop.rs: remove all references to CFFileDescriptor ----
+          $f = Join-Path $cfDir.FullName "src\runloop.rs"
+          if (Test-Path $f) {
+            $src = Get-Content $f -Raw
+            # Remove the import line
+            $new = $src -replace 'use filedescriptor::CFFileDescriptor;\r?\n', ''
+            # Remove the from_file_descriptor function (pub fn ... { ... })
+            # It spans multiple lines so we use a non-greedy multiline match
+            $new = [regex]::Replace($new,
+              '(?s)pub fn from_file_descriptor\(fd: &CFFileDescriptor.*?\}(\s*\})',
+              '$1')
+            if ($new -ne $src) {
+              Set-Content $f $new -NoNewline
+              Write-Host "  Patched runloop.rs (CFFileDescriptor removed)"
+            } else { Write-Host "  runloop.rs: pattern not found, skipping" }
           }
 
-          Write-Host "All patches applied."
+          Write-Host "Done patching."
 
       - name: Install frontend dependencies
         run: npm install
