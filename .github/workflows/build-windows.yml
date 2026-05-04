@@ -37,11 +37,102 @@ jobs:
           $content = [regex]::Replace($content, '\r?\n\[patch\.crates-io\][\s\S]*$', '')
           Set-Content "src-tauri/Cargo.toml" $content -NoNewline
 
-      - name: Update tao to latest 0.16.x (drops cocoa/core-graphics on Windows)
+      - name: Fetch cargo dependencies
+        shell: pwsh
+        run: cd src-tauri && cargo fetch
+
+      - name: Patch all Apple-only crates for Windows
         shell: pwsh
         run: |
-          cd src-tauri
-          cargo update -p tao --precise 0.16.11
+          $reg = "$env:USERPROFILE\.cargo\registry\src"
+
+          function Prepend-CfgUnix($path) {
+            if (Test-Path $path) {
+              $src = Get-Content $path -Raw
+              if ($src -notmatch '#!\[cfg\(unix\)\]' -and $src -notmatch '#!\[cfg\(target_os') {
+                Set-Content $path ("#![cfg(unix)]`n" + $src) -NoNewline
+                Write-Host "  Gated (unix): $path"
+              }
+            }
+          }
+
+          function Prepend-CfgMacos($path) {
+            if (Test-Path $path) {
+              $src = Get-Content $path -Raw
+              if ($src -notmatch '#!\[cfg\(target_os = .macos.\)\]') {
+                Set-Content $path ('#![cfg(target_os = "macos")]' + "`n" + $src) -NoNewline
+                Write-Host "  Gated (macos): $path"
+              }
+            }
+          }
+
+          # ── core-foundation ──────────────────────────────────────────────
+          $cf = Get-ChildItem $reg -Recurse -Directory |
+            Where-Object { $_.Name -match '^core-foundation-\d' } | Select-Object -First 1
+          if ($cf) {
+            Write-Host "Patching $($cf.Name)"
+            Prepend-CfgUnix  (Join-Path $cf.FullName "src\filedescriptor.rs")
+
+            # url.rs: strip PATH_MAX from libc import
+            $f = Join-Path $cf.FullName "src\url.rs"
+            if (Test-Path $f) {
+              $s = Get-Content $f -Raw
+              $s2 = $s -replace 'use libc::\{c_char, strlen, PATH_MAX\};', 'use libc::{c_char, strlen};'
+              if ($s2 -ne $s) { Set-Content $f $s2 -NoNewline; Write-Host "  Fixed PATH_MAX in url.rs" }
+            }
+
+            # runloop.rs: remove CFFileDescriptor import + function
+            $f = Join-Path $cf.FullName "src\runloop.rs"
+            if (Test-Path $f) {
+              $s = Get-Content $f -Raw
+              $s2 = $s -replace 'use filedescriptor::CFFileDescriptor;\r?\n', ''
+              $s2 = [regex]::Replace($s2,
+                '(?s)\s*pub fn from_file_descriptor\(fd: &CFFileDescriptor[^}]+\}(\s*\})',
+                '$1')
+              if ($s2 -ne $s) { Set-Content $f $s2 -NoNewline; Write-Host "  Fixed CFFileDescriptor in runloop.rs" }
+            }
+          }
+
+          # ── core-graphics-types ──────────────────────────────────────────
+          $cgt = Get-ChildItem $reg -Recurse -Directory |
+            Where-Object { $_.Name -match '^core-graphics-types-' } | Select-Object -First 1
+          if ($cgt) {
+            Write-Host "Patching $($cgt.Name)"
+            # Gate every .rs file that uses #[link(... kind = "framework")]
+            Get-ChildItem (Join-Path $cgt.FullName "src") -Filter "*.rs" | ForEach-Object {
+              $s = Get-Content $_.FullName -Raw
+              if ($s -match 'kind = "framework"') {
+                Prepend-CfgMacos $_.FullName
+              }
+            }
+          }
+
+          # ── core-graphics ────────────────────────────────────────────────
+          $cg = Get-ChildItem $reg -Recurse -Directory |
+            Where-Object { $_.Name -match '^core-graphics-\d' } | Select-Object -First 1
+          if ($cg) {
+            Write-Host "Patching $($cg.Name)"
+            Get-ChildItem (Join-Path $cg.FullName "src") -Filter "*.rs" | ForEach-Object {
+              $s = Get-Content $_.FullName -Raw
+              if ($s -match 'kind = "framework"') {
+                Prepend-CfgMacos $_.FullName
+              }
+            }
+          }
+
+          # ── cocoa / cocoa-foundation ─────────────────────────────────────
+          Get-ChildItem $reg -Recurse -Directory |
+            Where-Object { $_.Name -match '^cocoa(-foundation)?-\d' } | ForEach-Object {
+              Write-Host "Gating $($_.Name) as macos-only"
+              Get-ChildItem (Join-Path $_.FullName "src") -Filter "*.rs" -ErrorAction SilentlyContinue | ForEach-Object {
+                Prepend-CfgMacos $_.FullName
+              }
+              # Gate the lib.rs at crate root too
+              $lib = Join-Path $_.FullName "src\lib.rs"
+              if (Test-Path $lib) { Prepend-CfgMacos $lib }
+            }
+
+          Write-Host "All patches applied."
 
       - name: Install frontend dependencies
         run: npm install
