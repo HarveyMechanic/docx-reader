@@ -2,48 +2,39 @@
     all(not(debug_assertions), target_os = "windows"),
     windows_subsystem = "windows"
 )]
-
+#[cfg(target_os = "macos")]
 use cocoa::appkit::{NSWindow, NSWindowStyleMask};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use tauri::api::dialog::FileDialogBuilder;
 use tauri::{AppHandle, Runtime, State, Window, WindowBuilder, WindowUrl};
-
 mod document;
-
 mod app_commands;
 mod document_commands;
 mod menu;
-
 use app_commands::{WindowCreate, WindowsCreate, WindowsCreateState};
 use document_commands::{OutlineParas, Paras, SearchResults, SearchResultsState};
-
 use menu::get_menu;
-
 use std::sync::Mutex;
-
+#[cfg(target_os = "macos")]
 use cocoa::appkit::NSWindowTitleVisibility;
 use tauri::api::shell::open;
 use tauri::Manager;
-
 pub trait WindowExt {
     #[cfg(target_os = "macos")]
     fn set_transparent_titlebar(&self, transparent: bool);
 }
-
 impl<R: Runtime> WindowExt for Window<R> {
     #[cfg(target_os = "macos")]
     fn set_transparent_titlebar(&self, transparent: bool) {
         unsafe {
             let id = self.ns_window().unwrap() as cocoa::base::id;
-
             let mut style_mask = id.styleMask();
             style_mask.set(
                 NSWindowStyleMask::NSFullSizeContentViewWindowMask,
                 transparent,
             );
             id.setStyleMask_(style_mask);
-
             id.setTitleVisibility_(if transparent {
                 NSWindowTitleVisibility::NSWindowTitleHidden
             } else {
@@ -51,6 +42,13 @@ impl<R: Runtime> WindowExt for Window<R> {
             });
             id.setTitlebarAppearsTransparent_(if transparent {
                 cocoa::base::YES
+            } else {
+                cocoa::base::NO
+            });
+        }
+    }
+}
+// TODO remember which window to focus on when opening multiple
             } else {
                 cocoa::base::NO
             });
