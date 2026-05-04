@@ -30,35 +30,67 @@ jobs:
         with:
           workspaces: './src-tauri -> target'
 
-      - name: Remove bad patch from Cargo.toml
+      - name: Remove any patch from Cargo.toml
         shell: pwsh
         run: |
           $content = Get-Content "src-tauri/Cargo.toml" -Raw
           $content = [regex]::Replace($content, '\r?\n\[patch\.crates-io\][\s\S]*$', '')
           Set-Content "src-tauri/Cargo.toml" $content -NoNewline
 
-      - name: Patch filedescriptor.rs to skip Unix code on Windows
+      - name: Fetch cargo dependencies
+        shell: pwsh
+        run: |
+          cd src-tauri
+          cargo fetch
+
+      - name: Patch core-foundation for Windows
         shell: pwsh
         run: |
           $cargoHome = $env:USERPROFILE + "\.cargo"
-          # First run cargo fetch so the crate source is downloaded
-          cd src-tauri
-          cargo fetch
-          cd ..
-          # Find the filedescriptor.rs file in the cargo registry
-          $file = Get-ChildItem -Path "$cargoHome\registry\src" -Recurse -Filter "filedescriptor.rs" |
-            Where-Object { $_.FullName -like "*core-foundation*" } |
+          $registryBase = "$cargoHome\registry\src"
+
+          # Find the core-foundation source directory (any version)
+          $cfDir = Get-ChildItem -Path $registryBase -Recurse -Directory |
+            Where-Object { $_.Name -like "core-foundation-*" -and $_.Name -notlike "core-foundation-sys*" } |
             Select-Object -First 1
-          if ($file) {
-            Write-Host "Patching: $($file.FullName)"
-            $src = Get-Content $file.FullName -Raw
-            # Wrap the entire file content in a cfg(unix) gate
-            $patched = "#[cfg(unix)]`nmod inner {`n" + $src + "`n}`n"
-            Set-Content $file.FullName $patched
-            Write-Host "Patched successfully"
-          } else {
-            Write-Host "filedescriptor.rs not found - may already be clean"
+
+          if (-not $cfDir) {
+            Write-Error "Could not find core-foundation source directory"
+            exit 1
           }
+
+          Write-Host "Found core-foundation at: $($cfDir.FullName)"
+
+          # --- Patch filedescriptor.rs: wrap entire content in #[cfg(unix)] ---
+          $fdFile = Join-Path $cfDir.FullName "src\filedescriptor.rs"
+          if (Test-Path $fdFile) {
+            Write-Host "Patching filedescriptor.rs"
+            $src = Get-Content $fdFile -Raw
+            if ($src -notmatch '#\[cfg\(unix\)\]') {
+              $patched = "#![cfg(unix)]`n`n" + $src
+              Set-Content $fdFile $patched -NoNewline
+            }
+          }
+
+          # --- Patch url.rs: remove PATH_MAX from the libc import ---
+          $urlFile = Join-Path $cfDir.FullName "src\url.rs"
+          if (Test-Path $urlFile) {
+            Write-Host "Patching url.rs"
+            $src = Get-Content $urlFile -Raw
+            $src = $src -replace 'use libc::\{c_char, strlen, PATH_MAX\};', '#[cfg(unix)] use libc::{c_char, strlen, PATH_MAX};'
+            Set-Content $urlFile $src -NoNewline
+          }
+
+          # --- Patch runloop.rs: gate the CFFileDescriptor import and usage ---
+          $rlFile = Join-Path $cfDir.FullName "src\runloop.rs"
+          if (Test-Path $rlFile) {
+            Write-Host "Patching runloop.rs"
+            $src = Get-Content $rlFile -Raw
+            $src = $src -replace 'use filedescriptor::CFFileDescriptor;', '#[cfg(unix)] use filedescriptor::CFFileDescriptor;'
+            Set-Content $rlFile $src -NoNewline
+          }
+
+          Write-Host "All patches applied."
 
       - name: Install frontend dependencies
         run: npm install
