@@ -38,12 +38,12 @@ jobs:
           $content = [regex]::Replace($content, '\r?\n\[patch\.crates-io\][\s\S]*$', '')
           Set-Content "src-tauri/Cargo.toml" $content -NoNewline
 
-      - name: Update core-foundation to fixed version
+     - name: Update core-foundation to fixed version
         shell: pwsh
         run: |
           cd src-tauri
-          # Force cargo to use core-foundation 0.9.4 which has the Windows fix
           cargo update -p core-foundation --precise 0.9.4
+          cargo update -p cocoa --precise 0.24.1
        
 
       - name: Install frontend dependencies
