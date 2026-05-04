@@ -2,7 +2,9 @@ use std::path::PathBuf;
 use tauri::api::dialog::blocking::FileDialogBuilder as FileDialogBuilderBlocking;
 use tauri::{Runtime, State, Window};
 
+#[cfg(target_os = "macos")]
 use cocoa::appkit::NSWindowTitleVisibility;
+#[cfg(target_os = "macos")]
 use cocoa::appkit::{NSWindow, NSWindowStyleMask};
 use open;
 use std::collections::HashMap;
