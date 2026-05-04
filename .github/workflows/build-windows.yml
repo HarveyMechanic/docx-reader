@@ -44,7 +44,7 @@ jobs:
           cd src-tauri
           # Force cargo to use core-foundation 0.9.4 which has the Windows fix
           cargo update -p core-foundation --precise 0.9.4
-          cargo update -p core-foundation-sys --precise 0.9.4
+       
 
       - name: Install frontend dependencies
         run: npm install
